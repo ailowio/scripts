@@ -1,6 +1,6 @@
 (async () => {
-  const INICIO = { ano: 2024, mes: 11 }; // novembro/2024
-  const FIM = { ano: 2026, mes: 5 };     // maio/2026
+  const INICIO = { ano: 2025, mes: 2 }; // fevereiro/2025
+  const FIM = { ano: 2026, mes: 5 };    // maio/2026
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -20,29 +20,8 @@
     dezembro: 12
   };
 
-  const nomeMes = {
-    1: "janeiro",
-    2: "fevereiro",
-    3: "março",
-    4: "abril",
-    5: "maio",
-    6: "junho",
-    7: "julho",
-    8: "agosto",
-    9: "setembro",
-    10: "outubro",
-    11: "novembro",
-    12: "dezembro"
-  };
-
   const regexMes = /(janeiro|fevereiro|março|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)\s+de\s+(\d{4})/i;
   const chave = p => p.ano * 12 + p.mes;
-
-  const exigirAbaAtiva = () => {
-    if (document.visibilityState !== "visible") {
-      throw new Error("A aba perdeu foco. Deixe o Conta Azul aberto e visível enquanto o script roda.");
-    }
-  };
 
   const isVisible = el => {
     if (!el) return false;
@@ -51,11 +30,17 @@
     return r.width > 0 && r.height > 0 && s.display !== "none" && s.visibility !== "hidden";
   };
 
+  const exigirAbaAtiva = () => {
+    if (document.visibilityState !== "visible") {
+      throw new Error("A aba perdeu foco. Deixe o Conta Azul aberto e visível enquanto o script roda.");
+    }
+  };
+
   const clickSeguro = async el => {
     exigirAbaAtiva();
 
     el.scrollIntoView({ block: "center" });
-    await sleep(250);
+    await sleep(300);
 
     const r = el.getBoundingClientRect();
     const x = r.left + r.width / 2;
@@ -70,19 +55,28 @@
         clientY: y
       }));
     });
-
-    el.click();
   };
 
   const fecharMenus = async () => {
-    document.dispatchEvent(new KeyboardEvent("keydown", {
-      key: "Escape",
-      code: "Escape",
-      keyCode: 27,
-      which: 27,
-      bubbles: true
-    }));
-    await sleep(400);
+    for (let i = 0; i < 3; i++) {
+      document.dispatchEvent(new KeyboardEvent("keydown", {
+        key: "Escape",
+        code: "Escape",
+        keyCode: 27,
+        which: 27,
+        bubbles: true
+      }));
+
+      document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      document.body.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+      await sleep(400);
+
+      const menusAbertos = [...document.querySelectorAll(".ds-dropdown-item")].filter(isVisible);
+
+      if (menusAbertos.length === 0) return;
+    }
   };
 
   const getFiltroPeriodo = () => {
@@ -102,7 +96,7 @@
     const match = texto.match(regexMes);
 
     if (!match) {
-      throw new Error("Não consegui ler o mês atual no filtro de período.");
+      throw new Error("Não consegui ler o mês atual.");
     }
 
     return {
@@ -112,32 +106,73 @@
     };
   };
 
-  const esperarMesMudar = async antes => {
-    for (let i = 0; i < 50; i++) {
-      exigirAbaAtiva();
-      await sleep(300);
+  const esperarXMLVisivel = async () => {
+    for (let i = 0; i < 25; i++) {
+      await sleep(150);
 
-      const depois = getPeriodoAtual();
+      const xml = [...document.querySelectorAll(".ds-dropdown-item")]
+        .filter(isVisible)
+        .find(el => el.textContent.trim() === "XML");
 
-      if (chave(depois) !== chave(antes)) {
-        console.log(`Mês alterado: ${antes.texto} -> ${depois.texto}`);
-        await sleep(2500);
-        return depois;
-      }
+      if (xml) return xml;
     }
 
-    throw new Error(`Cliquei no próximo mês, mas a tela continuou em ${antes.texto}.`);
+    return null;
+  };
+
+  const baixarXMLsDoMesAtual = async () => {
+    exigirAbaAtiva();
+    await fecharMenus();
+
+    const atual = getPeriodoAtual();
+
+    const itens = [...document.querySelectorAll("tbody tr")]
+      .map(linha => ({
+        linha,
+        botao: [...linha.querySelectorAll("button")]
+          .find(btn => btn.querySelector('svg[data-icon="arrow-down-to-line"]'))
+      }))
+      .filter(x => x.botao);
+
+    console.log(`===== ${atual.texto} | XMLs encontrados: ${itens.length} =====`);
+
+    for (let i = 0; i < itens.length; i++) {
+      exigirAbaAtiva();
+
+      const { linha, botao } = itens[i];
+
+      await fecharMenus();
+      await clickSeguro(botao);
+
+      const xml = await esperarXMLVisivel();
+
+      if (!xml) {
+        console.warn("XML não encontrado nesta linha:", linha.innerText);
+        continue;
+      }
+
+      await clickSeguro(xml);
+
+      console.log(`XML ${i + 1}/${itens.length}: ${linha.innerText.replace(/\n/g, " | ")}`);
+      await sleep(3800);
+    }
+
+    await fecharMenus();
   };
 
   const clicarProximoMes = async () => {
     await fecharMenus();
     window.scrollTo(0, 0);
-    await sleep(700);
+    await sleep(900);
 
     const antes = getPeriodoAtual();
 
-    for (let tentativa = 1; tentativa <= 3; tentativa++) {
+    for (let tentativa = 1; tentativa <= 4; tentativa++) {
       exigirAbaAtiva();
+
+      await fecharMenus();
+      window.scrollTo(0, 0);
+      await sleep(700);
 
       const filtro = getFiltroPeriodo();
 
@@ -150,98 +185,59 @@
         throw new Error("Não encontrei o botão de próximo mês.");
       }
 
-      console.log(`Tentando avançar mês. Tentativa ${tentativa}/3...`);
+      console.log(`Tentando avançar mês: ${antes.texto}. Tentativa ${tentativa}/4`);
       await clickSeguro(btnProximo);
 
-      try {
-        return await esperarMesMudar(antes);
-      } catch (e) {
-        if (tentativa === 3) throw e;
-        await sleep(1200);
+      for (let i = 0; i < 30; i++) {
+        await sleep(300);
+
+        const depois = getPeriodoAtual();
+
+        if (chave(depois) !== chave(antes)) {
+          console.log(`Mês alterado: ${antes.texto} -> ${depois.texto}`);
+          await sleep(3000);
+          return depois;
+        }
       }
+    }
+
+    throw new Error(`Não consegui avançar o mês após 4 tentativas. Ainda está em ${antes.texto}.`);
+  };
+
+  const prepararInicio = async () => {
+    let atual = getPeriodoAtual();
+
+    if (chave(atual) === chave(INICIO)) {
+      console.log(`Já está em ${atual.texto}. Iniciando extração.`);
+      return;
+    }
+
+    if (chave(atual) === chave({ ano: 2025, mes: 1 })) {
+      console.log("Janeiro/2025 já foi baixado. Indo para Fevereiro/2025...");
+      atual = await clicarProximoMes();
+    }
+
+    if (chave(atual) !== chave(INICIO)) {
+      throw new Error(`A tela precisa estar em Janeiro/2025 ou Fevereiro/2025. Agora está em ${atual.texto}.`);
     }
   };
 
-  const baixarXMLsDoMesAtual = async () => {
-    exigirAbaAtiva();
-    await fecharMenus();
+  console.log("Iniciando continuação: Fevereiro/2025 até Maio/2026.");
+  console.log("Não saia desta aba. Deixe zoom em 100% e não mexa no mouse/teclado.");
 
-    const atual = getPeriodoAtual();
-
-    const itens = [...document.querySelectorAll("tbody tr")]
-      .map(linha => ({
-        chaveLinha: linha.innerText.replace(/\s+/g, " ").trim(),
-        linha,
-        botao: [...linha.querySelectorAll("button")]
-          .find(btn => btn.querySelector('svg[data-icon="arrow-down-to-line"]'))
-      }))
-      .filter(x => x.botao);
-
-    const jaProcessadas = new Set();
-
-    console.log(`===== ${atual.texto} | XMLs encontrados: ${itens.length} =====`);
-
-    for (let i = 0; i < itens.length; i++) {
-      exigirAbaAtiva();
-
-      const { linha, botao, chaveLinha } = itens[i];
-
-      if (jaProcessadas.has(chaveLinha)) {
-        console.warn("Linha duplicada ignorada:", chaveLinha);
-        continue;
-      }
-
-      jaProcessadas.add(chaveLinha);
-
-      await fecharMenus();
-      await clickSeguro(botao);
-      await sleep(1000);
-
-      const xml = [...document.querySelectorAll(".ds-dropdown-item")]
-        .filter(isVisible)
-        .find(el => el.textContent.trim() === "XML");
-
-      if (!xml) {
-        console.warn("XML não encontrado nesta linha:", linha.innerText);
-        continue;
-      }
-
-      await clickSeguro(xml);
-
-      console.log(`XML ${i + 1}/${itens.length}: ${linha.innerText.replace(/\n/g, " | ")}`);
-      await sleep(3200);
-    }
-  };
-
-  const irParaNovembroSeEstiverEmOutubro = async () => {
-    const atual = getPeriodoAtual();
-
-    if (atual.ano === 2024 && atual.mes === 10) {
-      console.log("Outubro/2024 já foi finalizado. Indo para novembro/2024...");
-      await clicarProximoMes();
-    }
-
-    const novoAtual = getPeriodoAtual();
-
-    if (chave(novoAtual) !== chave(INICIO)) {
-      throw new Error(`A tela precisa estar em novembro/2024. Agora está em ${novoAtual.texto}.`);
-    }
-  };
-
-  console.log("Iniciando. Não saia desta aba até finalizar.");
-  await irParaNovembroSeEstiverEmOutubro();
+  await prepararInicio();
 
   while (chave(getPeriodoAtual()) <= chave(FIM)) {
-    const atual = getPeriodoAtual();
+    const atualAntesDeBaixar = getPeriodoAtual();
 
     await baixarXMLsDoMesAtual();
 
-    if (chave(atual) === chave(FIM)) {
+    if (chave(atualAntesDeBaixar) === chave(FIM)) {
       break;
     }
 
     await clicarProximoMes();
   }
 
-  console.log("Finalizado: novembro/2024 até maio/2026.");
+  console.log("Finalizado: Fevereiro/2025 até Maio/2026.");
 })();
